@@ -14,7 +14,7 @@ echo " Użytkownik: $CURRENT_USER | Katalog: $SCRIPT_DIR"
 echo "========================================================"
 
 # 1. Aktualizacja repozytoriów i instalacja pakietów systemowych
-echo "[1/4] Instalacja wymaganych pakietów systemowych (APT)..."
+echo "[1/5] Instalacja wymaganych pakietów systemowych (APT)..."
 sudo apt-get update
 sudo apt-get install -y \
     python3 \
@@ -55,8 +55,8 @@ After=network.target
 [Service]
 Type=simple
 User=$CURRENT_USER
-WorkingDirectory=$USER_HOME
-ExecStart=/usr/bin/python3 $USER_HOME/camera_stream.py
+WorkingDirectory=$SCRIPT_DIR
+ExecStart=/usr/bin/python3 $SCRIPT_DIR/camera_stream.py
 Restart=always
 RestartSec=3
 
@@ -68,8 +68,8 @@ sudo systemctl daemon-reload
 sudo systemctl enable camera-stream.service
 sudo systemctl restart camera-stream.service
 
-# 4. Konfiguracja dysku sieciowego (Samba - tylko sieć lokalna LAN)
-echo "[4/5] Konfiguracja dysku sieciowego Samba..."
+# 5. Konfiguracja dysku sieciowego (Samba - tylko sieć lokalna LAN)
+echo "[5/5] Konfiguracja dysku sieciowego Samba..."
 if ! grep -q "bind interfaces only = yes" /etc/samba/smb.conf 2>/dev/null; then
     sudo sed -i 's/;   interfaces = 127.0.0.0\/8 eth0/   interfaces = 127.0.0.0\/8 192.168.1.0\/24 wlan0 eth0/' /etc/samba/smb.conf || true
     sudo sed -i 's/;   bind interfaces only = yes/   bind interfaces only = yes/' /etc/samba/smb.conf || true

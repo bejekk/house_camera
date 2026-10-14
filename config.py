@@ -2,8 +2,8 @@
 import os
 
 # Ścieżki dyskowe
-RECORDINGS_DIR = os.getenv("RECORDINGS_DIR", "/home/bejek/recordings")
-MODELS_DIR = os.getenv("MODELS_DIR", "/home/bejek/models")
+RECORDINGS_DIR = os.getenv("RECORDINGS_DIR", os.path.expanduser("~/recordings"))
+MODELS_DIR = os.getenv("MODELS_DIR", os.path.expanduser("~/models"))
 
 MODEL_PROTO = os.path.join(MODELS_DIR, "MobileNetSSD_deploy.prototxt")
 MODEL_WEIGHTS = os.path.join(MODELS_DIR, "MobileNetSSD_deploy.caffemodel")

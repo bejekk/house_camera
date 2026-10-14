@@ -3,18 +3,20 @@
 Lekki, samodzielny system monitoringu domowego z podglądem na żywo, detekcją ruchu OpenCV MOG2, inteligentną klasyfikacją obiektów AI (człowiek / pies / ruch) przez MobileNet-SSD, bezpośrednim zapisem wideo MP4 (H.264, maks. 2 min) na dysk sieciowy Samba i panelem webowym CCTV.
 
 ### 🧠 Inteligentna klasyfikacja nagrań (AI)
-System po wykryciu ruchu analizuje klatki w tle siecią neuronową MobileNet-SSD i automatycznie nazywa pliki wideo:
+System po wykryciu ruchu analizuje klatki w tle siecią neuronową MobileNet-SSD z odpornym algorytmem głosowania wieloklatkowego (eliminacja fałszywych alarmów) i automatycznie nazywa pliki wideo:
 * `czlowiek_pies_YYYY-MM-DD_HH-MM-SS.mp4` – gdy w kadrze znajdował się zarówno człowiek, jak i pies
 * `czlowiek_YYYY-MM-DD_HH-MM-SS.mp4` – gdy wykryto człowieka
-* `pies_YYYY-MM-DD_HH-MM-SS.mp4` – gdy wykryto psa
+* `pies_YYYY-MM-DD_HH-MM-SS.mp4` – gdy wykryto psa / czworonoga domowego
+* `ruch_YYYY-MM-DD_HH-MM-SS.mp4` – ogólny ruch bez identyfikacji postaci
+
 ### 📁 Architektura modułowa
 Kod został podzielony na czytelne, wyspecjalizowane moduły:
 * `config.py` – centralna konfiguracja rozdzielczości, FPS, progów detekcji i ścieżek
 * `main.py` – główny orkiestrator spinający strumień, detekcję, zapis i serwer WWW
-* `streamer.py` – sprzętowa obsługa sensora kamery przez `rpicam-vid`
+* `streamer.py` – sprzętowa obsługa sensora kamery przez `rpicam-vid` (profil NoIR)
 * `detector.py` – lekka, adaptacyjna detekcja ruchu OpenCV MOG2
 * `ai_classifier.py` – asynchroniczna klasyfikacja obiektów AI (MobileNet-SSD: człowiek / pies)
-* `recorder.py` – rejestrator nagrań H.264 z automatycznym nazewnictwem zdarzeń
+* `recorder.py` – rejestrator nagrań sprzętowym enkoderem GPU H.264 (v4l2m2m)
 * `storage.py` – zarządzanie przestrzenią na karcie SD i udostępnianiem Samba
 * `web_server.py` – serwer HTTP, routing API i surowy panel podglądu CCTV
 * `camera_stream.py` – przezroczysty punkt startowy zgodny z usługą systemd
@@ -23,9 +25,11 @@ Kod został podzielony na czytelne, wyspecjalizowane moduły:
 
 ## 🚀 Szybka instalacja na nowym systemie (1 polecenie)
 
-Jeśli instalujesz system na nowo postawionym Raspberry Pi OS (Debian 12 Bookworm lub Debian 13 Trixie), wystarczy sklonować/przekopiować pliki do katalogu domowego (`/home/$USER`) i uruchomić:
+Jeśli instalujesz system na nowo postawionym Raspberry Pi OS (Debian 12 Bookworm lub Debian 13 Trixie), wystarczy sklonować repozytorium i uruchomić skrypt instalacyjny:
 
 ```bash
+git clone https://github.com/bejekk/house_camera.git ~/camera_domowa
+cd ~/camera_domowa
 chmod +x install.sh
 ./install.sh
 ```
