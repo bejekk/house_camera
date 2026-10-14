@@ -7,7 +7,17 @@ System po wykryciu ruchu analizuje klatki w tle siecią neuronową MobileNet-SSD
 * `czlowiek_pies_YYYY-MM-DD_HH-MM-SS.mp4` – gdy w kadrze znajdował się zarówno człowiek, jak i pies
 * `czlowiek_YYYY-MM-DD_HH-MM-SS.mp4` – gdy wykryto człowieka
 * `pies_YYYY-MM-DD_HH-MM-SS.mp4` – gdy wykryto psa
-* `ruch_YYYY-MM-DD_HH-MM-SS.mp4` – ruch niezidentyfikowany lub inne obiekty
+### 📁 Architektura modułowa
+Kod został podzielony na czytelne, wyspecjalizowane moduły:
+* `config.py` – centralna konfiguracja rozdzielczości, FPS, progów detekcji i ścieżek
+* `main.py` – główny orkiestrator spinający strumień, detekcję, zapis i serwer WWW
+* `streamer.py` – sprzętowa obsługa sensora kamery przez `rpicam-vid`
+* `detector.py` – lekka, adaptacyjna detekcja ruchu OpenCV MOG2
+* `ai_classifier.py` – asynchroniczna klasyfikacja obiektów AI (MobileNet-SSD: człowiek / pies)
+* `recorder.py` – rejestrator nagrań H.264 z automatycznym nazewnictwem zdarzeń
+* `storage.py` – zarządzanie przestrzenią na karcie SD i udostępnianiem Samba
+* `web_server.py` – serwer HTTP, routing API i surowy panel podglądu CCTV
+* `camera_stream.py` – przezroczysty punkt startowy zgodny z usługą systemd
 
 ---
 
