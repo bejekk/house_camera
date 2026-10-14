@@ -31,6 +31,8 @@ class VideoRecorder:
 
         # Asynchroniczny worker klasyfikacji AI
         self.ai = AIClassifier()
+        self.person_confs = []
+        self.dog_confs = []
         self.detected_labels = set()
         self.last_detection_summary = "Brak"
         self.ai_busy = False
@@ -60,12 +62,33 @@ class VideoRecorder:
 
             if frame_bytes:
                 self.ai_busy = True
-                labels, details = self.ai.detect_objects(frame_bytes)
-                if labels:
+                dets = self.ai.detect_objects(frame_bytes)
+                if dets:
                     with self.lock:
-                        self.detected_labels.update(labels)
-                        summary_parts = [f"{lbl} ({round(conf*100)}%)" for lbl, conf in details]
-                        self.last_detection_summary = ", ".join(summary_parts)
+                        for label, conf in dets:
+                            if label == "czlowiek":
+                                self.person_confs.append(conf)
+                            elif label == "pies":
+                                self.dog_confs.append(conf)
+
+                        # Wieloklatkowa weryfikacja na żywo
+                        is_p = (len([c for c in self.person_confs if c >= 0.50]) >= 2) or any(c >= 0.65 for c in self.person_confs)
+                        is_d = (len([c for c in self.dog_confs if c >= 0.38]) >= 2) or any(c >= 0.55 for c in self.dog_confs)
+
+                        labels = set()
+                        summary_parts = []
+                        if is_p:
+                            labels.add("czlowiek")
+                            max_p = max(self.person_confs, default=0.0)
+                            summary_parts.append(f"człowiek ({round(max_p*100)}%)")
+                        if is_d:
+                            labels.add("pies")
+                            max_d = max(self.dog_confs, default=0.0)
+                            summary_parts.append(f"pies ({round(max_d*100)}%)")
+
+                        self.detected_labels = labels
+                        if summary_parts:
+                            self.last_detection_summary = ", ".join(summary_parts)
                 self.ai_busy = False
 
     def _writer_loop(self, proc, queue, event):
@@ -81,8 +104,7 @@ class VideoRecorder:
                 if proc and proc.stdin:
                     try:
                         proc.stdin.write(frame)
-                        with self.lock:
-                            self.frames_written += 1
+                        self.frames_written += 1
                     except (BrokenPipeError, OSError):
                         return
 
@@ -107,6 +129,8 @@ class VideoRecorder:
         storage_manager.cleanup_old_recordings()
         ts_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         self.current_ts = ts_str
+        self.person_confs = []
+        self.dog_confs = []
         self.detected_labels = set()
         self.last_ai_sample_time = time.time()
         self.rec_queue.clear()
@@ -231,11 +255,12 @@ class VideoRecorder:
             self.proc = None
             filepath = self.current_filepath
             ts_str = self.current_ts
-            detected_snapshot = set(self.detected_labels)
+            p_confs = list(self.person_confs)
+            d_confs = list(self.dog_confs)
             rec_q = self.rec_queue
             rec_ev = self.rec_event
 
-        def finalize(p, fpath, detected_classes, ts, queue, event):
+        def finalize(p, fpath, p_list, d_list, ts, queue, event):
             # Opróżnij pozostałe klatki z bufora
             event.set()
             time.sleep(0.3)
@@ -259,18 +284,20 @@ class VideoRecorder:
 
             time.sleep(0.5)
             with self.lock:
-                final_detected = set(detected_classes).union(self.detected_labels)
+                final_p = p_list + [c for c in self.person_confs if c not in p_list]
+                final_d = d_list + [c for c in self.dog_confs if c not in d_list]
 
-            # Ustalenie ostatecznego prefiksu pliku:
-            # - człowiek i pies: czlowiek_pies
-            # - tylko człowiek: czlowiek
-            # - tylko pies: pies
-            # - inny/niezidentyfikowany ruch: ruch
-            if "czlowiek" in final_detected and "pies" in final_detected:
+            # Odporna weryfikacja wieloklatkowa (eliminuje fałszywe trafienia z pojedynczych klatek)
+            # Człowiek: minimum 2 trafienia >= 50% LUB 1 bardzo wyraźne trafienie >= 65%
+            is_person = (len([c for c in final_p if c >= 0.50]) >= 2) or any(c >= 0.65 for c in final_p)
+            # Pies: minimum 2 trafienia >= 38% LUB 1 wyraźne trafienie >= 55%
+            is_dog = (len([c for c in final_d if c >= 0.38]) >= 2) or any(c >= 0.55 for c in final_d)
+
+            if is_person and is_dog:
                 prefix = "czlowiek_pies"
-            elif "czlowiek" in final_detected:
+            elif is_person:
                 prefix = "czlowiek"
-            elif "pies" in final_detected:
+            elif is_dog:
                 prefix = "pies"
             else:
                 prefix = "ruch"
@@ -281,13 +308,13 @@ class VideoRecorder:
             if fpath and os.path.exists(fpath) and fpath != target_filepath:
                 try:
                     os.rename(fpath, target_filepath)
-                    print(f"[AI Recorder] Nagranie zapisane: {target_filename} (wykryto: {final_detected})")
+                    print(f"[AI Recorder] Nagranie zapisane: {target_filename} (człowiek: {len(final_p)} próbek, pies: {len(final_d)} próbek)")
                 except Exception as e:
                     print(f"[AI Recorder] Błąd zmiany nazwy: {e}")
 
         threading.Thread(
             target=finalize,
-            args=(proc, filepath, detected_snapshot, ts_str, rec_q, rec_ev),
+            args=(proc, filepath, p_confs, d_confs, ts_str, rec_q, rec_ev),
             daemon=True
         ).start()
 
