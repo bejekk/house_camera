@@ -21,8 +21,13 @@ class VideoRecorder:
         self.current_ts = ""
         self.start_time = 0
         self.last_motion_time = 0
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.frames_written = 0
+
+        # Asynchroniczna kolejka klatek wideo do zapisu (brak blokowania strumienia kamery)
+        self.rec_queue = deque(maxlen=30)
+        self.rec_event = threading.Event()
+        self.writer_thread = None
 
         # Asynchroniczny worker klasyfikacji AI
         self.ai = AIClassifier()
@@ -63,6 +68,24 @@ class VideoRecorder:
                         self.last_detection_summary = ", ".join(summary_parts)
                 self.ai_busy = False
 
+    def _writer_loop(self, proc, queue, event):
+        """Dedykowany wątek piszący do potoku ffmpeg w tle - zapobiega jakimkolwiek przycięciom kamery."""
+        while self.is_recording or len(queue) > 0:
+            event.wait(timeout=0.1)
+            event.clear()
+            while len(queue) > 0:
+                try:
+                    frame = queue.popleft()
+                except IndexError:
+                    break
+                if proc and proc.stdin:
+                    try:
+                        proc.stdin.write(frame)
+                        with self.lock:
+                            self.frames_written += 1
+                    except (BrokenPipeError, OSError):
+                        return
+
     def set_recording_enabled(self, enabled: bool):
         with self.lock:
             self.recording_enabled = bool(enabled)
@@ -86,21 +109,22 @@ class VideoRecorder:
         self.current_ts = ts_str
         self.detected_labels = set()
         self.last_ai_sample_time = time.time()
+        self.rec_queue.clear()
+        self.rec_event.clear()
 
         # Domyślna nazwa bazowa podczas nagrywania: ruch_<ts>.mp4
         self.current_filename = f"ruch_{ts_str}.mp4"
         self.current_filepath = os.path.join(self.output_dir, self.current_filename)
 
+        # Użycie sprzętowego enkodera VideoCore IV (h264_v4l2m2m) - minimalne zużycie CPU na Pi 3B!
         cmd = [
             "ffmpeg", "-y",
             "-f", "image2pipe",
             "-vcodec", "mjpeg",
             "-framerate", "15",
             "-i", "-",
-            "-vf", "scale=820:616",
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-crf", "26",
+            "-c:v", "h264_v4l2m2m",
+            "-b:v", "2500k",
             "-pix_fmt", "yuv420p",
             "-movflags", "+faststart",
             self.current_filepath
@@ -115,63 +139,116 @@ class VideoRecorder:
             self.is_recording = True
             self.start_time = time.time()
             self.frames_written = 0
+
+            # Uruchomienie wątku zapisującego w tle
+            self.writer_thread = threading.Thread(
+                target=self._writer_loop,
+                args=(self.proc, self.rec_queue, self.rec_event),
+                daemon=True
+            )
+            self.writer_thread.start()
+
             if frame_bytes:
-                try:
-                    self.proc.stdin.write(frame_bytes)
-                    self.frames_written += 1
-                except Exception:
-                    pass
+                self.rec_queue.append(frame_bytes)
+                self.rec_event.set()
                 if not self.ai_busy:
                     self.ai_queue.append(frame_bytes)
                     self.ai_event.set()
         except Exception:
-            self.proc = None
-            self.is_recording = False
+            # Rezerwowy enkoder programowy libx264, gdyby enkoder sprzętowy był niedostępny
+            fallback_cmd = [
+                "ffmpeg", "-y",
+                "-f", "image2pipe",
+                "-vcodec", "mjpeg",
+                "-framerate", "15",
+                "-i", "-",
+                "-c:v", "libx264",
+                "-preset", "ultrafast",
+                "-crf", "26",
+                "-pix_fmt", "yuv420p",
+                "-movflags", "+faststart",
+                self.current_filepath
+            ]
+            try:
+                self.proc = subprocess.Popen(
+                    fallback_cmd,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                self.is_recording = True
+                self.start_time = time.time()
+                self.frames_written = 0
+                self.writer_thread = threading.Thread(
+                    target=self._writer_loop,
+                    args=(self.proc, self.rec_queue, self.rec_event),
+                    daemon=True
+                )
+                self.writer_thread.start()
+                if frame_bytes:
+                    self.rec_queue.append(frame_bytes)
+                    self.rec_event.set()
+            except Exception:
+                self.proc = None
+                self.is_recording = False
 
     def feed_frame(self, frame_bytes):
+        should_stop = False
+        should_restart = False
         with self.lock:
-            if not self.recording_enabled or not self.is_recording or not self.proc:
+            if not self.recording_enabled or not self.is_recording:
                 return
             now = time.time()
             # Ograniczenie do maksymalnie 2 minut na klip
             if (now - self.start_time) >= MAX_CLIP_DURATION:
-                self.stop_recording()
-                # Jeśli ruch nadal trwa w ostatnich 15 sekundach, rozpocznij kolejny klip
-                if (now - self.last_motion_time) <= POST_MOTION_DURATION and self.recording_enabled and not self._is_dark():
-                    self.start_recording(frame_bytes)
-                return
+                should_stop = True
+                if (now - self.last_motion_time) <= POST_MOTION_DURATION and not self._is_dark():
+                    should_restart = True
+            elif (now - self.last_motion_time) > POST_MOTION_DURATION:
+                should_stop = True
+            else:
+                # Wrzucenie klatki do kolejki w tle (operacja natychmiastowa, ~0.001 ms, brak blokowania)
+                self.rec_queue.append(frame_bytes)
+                self.rec_event.set()
 
-            # Dogrywanie przez 15 sekund po ustaniu ruchu
-            if (now - self.last_motion_time) > POST_MOTION_DURATION:
-                self.stop_recording()
-                return
+                # Próbkowanie klatek dla AI (co ok. 1.8s)
+                if (now - self.last_ai_sample_time) >= AI_SAMPLE_INTERVAL and not self.ai_busy:
+                    self.last_ai_sample_time = now
+                    self.ai_queue.append(frame_bytes)
+                    self.ai_event.set()
 
-            try:
-                self.proc.stdin.write(frame_bytes)
-                self.frames_written += 1
-            except Exception:
-                self.stop_recording()
-                return
-
-            # Próbkowanie klatek dla AI (co ok. 1.5s bez blokowania strumienia)
-            if (now - self.last_ai_sample_time) >= AI_SAMPLE_INTERVAL and not self.ai_busy:
-                self.last_ai_sample_time = now
-                self.ai_queue.append(frame_bytes)
-                self.ai_event.set()
+        if should_stop:
+            self.stop_recording()
+            if should_restart:
+                self.start_recording(frame_bytes)
 
     def stop_recording(self):
-        if not self.is_recording:
-            return
-        self.is_recording = False
-        proc = self.proc
-        self.proc = None
-        filepath = self.current_filepath
-        ts_str = self.current_ts
-        detected_snapshot = set(self.detected_labels)
+        with self.lock:
+            if not self.is_recording:
+                return
+            self.is_recording = False
+            proc = self.proc
+            self.proc = None
+            filepath = self.current_filepath
+            ts_str = self.current_ts
+            detected_snapshot = set(self.detected_labels)
+            rec_q = self.rec_queue
+            rec_ev = self.rec_event
 
-        def finalize(p, fpath, detected_classes, ts):
+        def finalize(p, fpath, detected_classes, ts, queue, event):
+            # Opróżnij pozostałe klatki z bufora
+            event.set()
+            time.sleep(0.3)
+            while len(queue) > 0:
+                try:
+                    f = queue.popleft()
+                    if p and p.stdin:
+                        p.stdin.write(f)
+                except Exception:
+                    break
+
             try:
-                if p.stdin:
+                if p and p.stdin:
                     p.stdin.close()
                 p.wait(timeout=8)
             except Exception:
@@ -180,7 +257,7 @@ class VideoRecorder:
                 except Exception:
                     pass
 
-            time.sleep(0.6)
+            time.sleep(0.5)
             with self.lock:
                 final_detected = set(detected_classes).union(self.detected_labels)
 
@@ -208,6 +285,10 @@ class VideoRecorder:
                 except Exception as e:
                     print(f"[AI Recorder] Błąd zmiany nazwy: {e}")
 
-        threading.Thread(target=finalize, args=(proc, filepath, detected_snapshot, ts_str), daemon=True).start()
+        threading.Thread(
+            target=finalize,
+            args=(proc, filepath, detected_snapshot, ts_str, rec_q, rec_ev),
+            daemon=True
+        ).start()
 
 video_recorder = VideoRecorder(RECORDINGS_DIR)

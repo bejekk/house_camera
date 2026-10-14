@@ -31,7 +31,7 @@ class MotionDetector(threading.Thread):
         self.warmup_frames = 10
         self.subtractor = cv2.createBackgroundSubtractorMOG2(history=300, varThreshold=25, detectShadows=True)
         self.morph_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
 
     def set_ignore_in_dark(self, enabled: bool):
         with self.lock:

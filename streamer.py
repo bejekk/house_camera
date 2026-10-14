@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
+import os
 import subprocess
 import threading
 import time
-from config import CAMERA_WIDTH, CAMERA_HEIGHT, CAMERA_FPS, CAMERA_QUALITY
+from config import CAMERA_WIDTH, CAMERA_HEIGHT, CAMERA_FPS, CAMERA_QUALITY, NOIR_TUNING_FILE
 
 class CameraStreamer:
     def __init__(self, width=CAMERA_WIDTH, height=CAMERA_HEIGHT, framerate=CAMERA_FPS, quality=CAMERA_QUALITY, on_frame=None):
@@ -33,9 +34,13 @@ class CameraStreamer:
             "--height", str(self.height),
             "--framerate", str(self.framerate),
             "-q", str(self.quality),
-            "--nopreview",
-            "-o", "-"
+            "--nopreview"
         ]
+        # Automatyczne załadowanie profilu kalibracji dla sensora NoIR (korekta różu/fioletu)
+        if os.path.exists(NOIR_TUNING_FILE):
+            cmd.extend(["--tuning-file", NOIR_TUNING_FILE])
+        cmd.extend(["-o", "-"])
+
         while self.running:
             try:
                 self.process = subprocess.Popen(
@@ -66,7 +71,10 @@ class CameraStreamer:
                             self.frame = jpg
                             self.condition.notify_all()
                         if self.on_frame:
-                            self.on_frame(jpg)
+                            try:
+                                self.on_frame(jpg)
+                            except Exception:
+                                pass
             except Exception:
                 time.sleep(1)
             finally:

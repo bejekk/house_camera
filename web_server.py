@@ -528,11 +528,11 @@ HTML_PAGE = """<!DOCTYPE html>
 
         <!-- Minimal Technical Footer -->
         <div class="footer">
-            <span>Format: <b>1640x1232 @ 15 FPS</b></span>
+            <span>Format: <b>1280x960 @ 15 FPS</b></span>
             <span>Algorytm: <b>MOG2 + MobileNet-SSD</b></span>
-            <span>Zapis: <b id="footer-rec-badge">H.264 MP4 (maks. 2m / +15s)</b></span>
+            <span>Zapis: <b id="footer-rec-badge">H.264 MP4 (GPU V4L2 M2M)</b></span>
             <span>Dysk sieciowy: <b>\\192.168.1.24\nagrania</b></span>
-            <span>Sensor: <b>Sony IMX219 NoIR</b></span>
+            <span>Sensor: <b>Sony IMX219 NoIR (profil NoIR)</b></span>
         </div>
     </div>
 
