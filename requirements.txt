@@ -1,0 +1,30 @@
+# ==============================================================================
+# Wymagania Python (pip / venv)
+# ==============================================================================
+# Na Raspberry Pi OS (Debian 12 Bookworm / 13 Trixie) zaleca się instalację
+# przez systemowy menedżer pakietów apt (poniżej), ale jeśli używasz wirtualnego
+# środowiska (venv), zainstaluj pakiety pipem:
+#
+#   python3 -m venv venv --system-site-packages
+#   source venv/bin/activate
+#   pip install -r requirements.txt
+# ==============================================================================
+
+numpy>=1.24.0
+opencv-python-headless>=4.8.0
+Pillow>=10.0.0
+
+# ==============================================================================
+# Wymagane pakiety systemowe (Debian / Raspberry Pi OS):
+# ==============================================================================
+# sudo apt update && sudo apt install -y \
+#     python3 \
+#     python3-pil \
+#     python3-numpy \
+#     python3-opencv \
+#     ffmpeg \
+#     rpicam-apps
+#
+# Opcjonalnie do dostępu zdalnego z dowolnego miejsca:
+# curl -fsSL https://tailscale.com/install.sh | sh
+# ==============================================================================
